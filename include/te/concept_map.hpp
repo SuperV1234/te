@@ -5,9 +5,9 @@
 #ifndef TE_CONCEPT_MAP_HPP
 #define TE_CONCEPT_MAP_HPP
 
+#include <te/detail/bind_signature.hpp>
 #include <te/detail/dsl.hpp>
 #include <te/detail/empty_object.hpp>
-#include <te/detail/transform_signature.hpp>
 
 #include <boost/hana/at_key.hpp>
 #include <boost/hana/bool.hpp>
@@ -48,30 +48,6 @@ namespace detail {
       lambda(std::forward<Args>(args)...);
     }
   };
-
-  template <typename Old, typename New>
-  struct replace {
-    template <typename T, typename = void>
-    struct apply { using type = T; };
-
-    template <typename Void>
-    struct apply<Old, Void> { using type = New; };
-    template <typename Void>
-    struct apply<Old&, Void> { using type = New&; };
-    template <typename Void>
-    struct apply<Old&&, Void> { using type = New&&; };
-    template <typename Void>
-    struct apply<Old*, Void> { using type = New*; };
-
-    template <typename Void>
-    struct apply<Old const, Void> { using type = New const; };
-    template <typename Void>
-    struct apply<Old const&, Void> { using type = New const&; };
-    template <typename Void>
-    struct apply<Old const&&, Void> { using type = New const&&; };
-    template <typename Void>
-    struct apply<Old const*, Void> { using type = New const*; };
-  };
 } // end namespace detail
 
 // A concept map is a statically-known mapping from functions implemented by
@@ -100,9 +76,8 @@ struct concept_map_t<Concept, T, boost::hana::pair<Name, Function>...> {
         Name,
         detail::default_constructible_lambda<
           Function,
-          typename detail::transform_signature<
-            typename decltype(Concept{}.get_signature(Name{}))::type,
-            detail::replace<te::T, T>::template apply
+          typename detail::bind_signature<
+            typename decltype(Concept{}.get_signature(Name{}))::type, T
           >::type
         >
       >...
@@ -255,30 +230,11 @@ constexpr auto make_concept_map(boost::hana::pair<Name, Function> ...mappings) {
   return decltype(make()){};
 }
 
-// Equivalent to `te::make_concept_map`, but for populating default concept maps.
-//
-// TODO:
-// This is a not-so-great solution for the following problem: when populating
-// a default concept map, we want to be able to populate it only partially,
-// while leaving the rest of the map to be populated by an explicit customization.
-// We can't use `te::make_concept_map` for this, because it makes sure that
-// the created concept map is sufficient to fulfill the concept, which would
-// not be the case for a default concept map.
+// Creates a default concept map for the given `Concept`, type `T` and
+// containing the given functions.
 template <typename Concept, typename T, typename ...Name, typename ...Function>
-constexpr auto make_default_concept_map(boost::hana::pair<Name, Function> ...mappings) {
-  // This `decltype(make()){}` pattern saves a lot of time that would be spent optimizing.
-  auto const make = [&]() {
-    auto mappings_ = boost::hana::make_map(mappings...);
-    auto refined = Concept::refined_concepts();
-    auto merged = boost::hana::fold_left(refined, mappings_, [](auto mappings, auto c) {
-      using C = typename decltype(c)::type;
-      return detail::merge(mappings, te::concept_map<C, T>.as_hana_map());
-    });
-    return boost::hana::unpack(merged, [](auto ...m) {
-      return te::concept_map_t<Concept, T, decltype(m)...>{};
-    });
-  };
-  return decltype(make()){};
+constexpr auto make_default_concept_map(boost::hana::pair<Name, Function>...) {
+  return te::concept_map_t<Concept, T, boost::hana::pair<Name, Function>...>{};
 }
 
 } // end namespace te
